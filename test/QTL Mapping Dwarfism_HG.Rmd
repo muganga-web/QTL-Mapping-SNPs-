@@ -1,0 +1,271 @@
+---
+title: "Mapping dwarfism (Plant height/Plant Girth at flowering) by a LMM approach"
+author: "Kivumbi Muganga"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: pdf_document
+
+---
+
+```{r setup + libraries, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,warning = FALSE)
+
+library(tidyverse)
+library(readxl)
+library(ggplot2)
+library(emmeans)
+library(lme4)   
+library(multcomp)
+library(lmerTest)
+library(openxlsx)
+library(knitr)
+library(redres)
+
+
+
+```
+```{r uploading data + data formatting}
+### uploading phenotype files
+pheno.C1 <- read.xlsx("./data/phenodata.xlsx", sheet = "Cycle 1")
+names(pheno.C1) 
+# turning phenotype columns into numeric variables
+pheno.C1<- pheno.C1%>%
+  mutate_at(vars(Pulp,Number.of.Leaves,Plant.height,Plant.Girth.at.1m.at.flowering), as.numeric)
+
+pheno.C2  <- read.xlsx("./DATA/PhenoData.xlsx",sheet = "Data_C2")
+#names(pheno.C2) 
+# turning phenotype columns into numeric variables
+pheno.C2<- pheno.C2%>%
+  mutate_at(vars(Pulp,Number.of.Leaves,Plant.height,Plant.Girth.at.1m.at.flowering), as.numeric)
+
+# uploading genotype files
+geno <- read.xlsx("./DATA/GenoData_limited.xlsx", sheet = "offspring_only")
+SNP <- read.xlsx("./DATA/GenoData_limited.xlsx", sheet = "marker_data")
+
+#merging pheno.C1 and pheno.C2 into a single phenotype file and turning Cycle into a factor
+pheno <- bind_rows(pheno.C1, pheno.C2)%>%
+  mutate_at(vars(Cycle),as.factor)
+
+# renaming pheno$accesion_name and turning into factor
+pheno<-pheno%>%
+  rename(accession = accession_name)%>%
+  mutate_at(vars(accession), as.factor)
+  
+# turning phenotype columns into numeric variables
+#pheno<- pheno%>%
+ # mutate_at(vars(Pulp,Number.of.Leaves,Plant.height.,Plant.Girth.at.1m.at# .flowering), as.numeric)
+
+# calculating ratio = # leaves/height of the plant; and plant height:girth ratio
+pheno <- pheno%>%
+  mutate(ratio_lh = Number.of.Leaves/Plant.height)%>%
+  mutate(ratio_hg = Plant.height/Plant.Girth.at.1m.at.flowering)
+
+# renaming GENOTYPE and turning into factor
+geno<-geno%>%
+  rename(accession = GENOTYPE)%>%
+  mutate_at(vars(accession),as.factor)
+
+
+
+# combine pheno and geno into a single GENO file
+# Only what is common between pheno and geno will be kept in the GENO file
+GENO<-pheno%>%
+  right_join(geno, by = "accession")
+
+
+# make long format of GENO
+
+cnames<-colnames(GENO)
+cnames
+
+GENO.L <- GENO%>%
+  pivot_longer(cols = cnames[26:280], names_to = "MARKER",values_to = "genotype")%>%
+  mutate(MARKER = as.factor(MARKER))%>%
+  filter(genotype != "NA")
+
+```
+
+
+
+## MAPPING C1&C2 plant height/girth ratio by a LMM approach
+
+```{r mapping height/girth ratio }
+
+# generate index of markers to loop through
+index <- GENO.L%>%group_by(MARKER)%>%
+  summarise(count = n())%>%
+  pull(MARKER) %>%  
+  as.character()
+
+# fit LMM marker by marker by lapply function to allow parallelization and store the results in a list
+
+allmap <- lapply(seq_along(index), function(i) {
+  message("Test for marker.id: ", i)
+
+  # always define results as NULL (empty list) at the beginning of the loop
+  results <- NULL
+
+  # subset data to a single MARKER
+  dataS <- GENO.L %>%
+    filter(MARKER == index[i]) %>%   
+    mutate(genotype = as.factor(genotype))%>%
+    drop_na(ratio_hg)
+#index[i] means that we are filtering the data for the specific marker at position i in the #index vector. This allows us to analyze each marker separately in the loop.
+  
+  if (nlevels(droplevels(dataS$genotype)) >= 2) {
+# Above requires that there are at least 2 genotypes for the marker to perform the analysis. If #there is only one genotype, the model cannot be fitted, and the results will remain NULL.
+
+#segregating the data by Cycle and accession to account for the nested structure of the data    
+    # fit the model and store the results
+  mod <- lmer(ratio_hg ~ Cycle + genotype + #(1|Cycle:block_number)+
+              (1|Cycle:accession), data = dataS)
+  summary(mod)
+  res <- compute_redres(mod, type = "std_cond")
+  
+# compute the fitted values   
+  fit <- fitted(mod)
+  
+  # flag observations as outliers
+  dataS<- dataS%>% mutate(res, fit)
+  dataS <- dataS %>% mutate(flag = factor(ifelse(abs(res) > 3, "outlier", "ok")))
+  
+  # replace outliers with NA's
+  dataS<-dataS%>%
+    mutate(ratio_hg = ifelse(abs(res) > 3, NA, ratio_hg))
+  
+  # refit the model and store the results
+  mod <- lmer(ratio_hg ~ Cycle + genotype + #(1|Cycle:block_number)+
+                (1|Cycle:accession), data = dataS)
+  
+  # extract anova
+  anova <- as_tibble(anova(mod)) %>%
+    rename ("Pr" = "Pr(>F)")
+  
+  # add factor column
+  anova$factor <- c("Cycle","genotype")
+  
+  
+  # obtain predictions
+  pred <- emmeans(mod, specs = "genotype") %>% 
+    as_tibble() 
+  
+    results <- list(ANV = anova,
+                    MEANS = pred)
+  }
+
+  return(results)
+})
+
+# get new_index of markers for which the mapping was performed, by filtering out the "NULL" outputs
+# this shows successful mapping for markers with at least 2 genotypes and no errors in the #model fitting
+valid <- sapply(allmap, function(x) !is.null(x))
+new_index <- index[valid]
+
+# filter allmap to keep only the valid outputs
+allmap <- allmap[sapply(allmap, is.list)]
+
+# assign new_index as names of allmap
+names(allmap)<-new_index
+
+# extract AOV results
+#AOV results are extracted from the list of results for each marker and combined into a single #data frame. The bind_rows function is used to combine the individual data frames for each #marker, and the .id argument is used to create a new column called "MARKER" that contains the #names of the markers.
+
+allaov <- lapply(allmap, function(x) {
+  return(x$ANV)
+}) %>%  bind_rows(.id = "MARKER")
+
+# extract MEANS results
+# mean for a trait across different genotypes for each marker are extracted from the list of #results for each marker and combined into a single data frame. The bind_rows function is used #to combine the individual data frames for each marker, and the .id argument is used to create #a new column called "MARKER" that contains the names of the markers.
+# if means are significant, we get peaks for the trait across different genotypes for each #marker. This information can be used to identify markers that are associated with significant #differences in the trait of interest.
+
+allmeans <- lapply(allmap, function(x) {
+  return(x$MEANS)
+}) %>%  bind_rows(.id = "MARKER")
+
+write.xlsx(allaov, "./OUTPUT/allaov dwarfism HG C1&C2.xlsx")
+write.xlsx(allmeans, "./OUTPUT/allmeans dwarfism HG C1&C2.xlsx")
+
+```
+
+## visualization of the C1&C2 mapping results in a manhattan plot and histogram of pvalues
+
+```{r visualization C1&C2 mapping results}
+
+# right join with marker data to get the positions and save
+Table <- allaov%>%
+  right_join(SNP, by="MARKER")
+
+
+
+Table.G<-Table%>%
+  filter(factor == "genotype")
+
+# make histogram of pvalues
+histo1<-ggplot(Table.G, aes(x = Pr)) +
+  geom_histogram(aes(y = ..density..), binwidth = 0.025,
+                 fill = "skyblue", color = "black") +
+  geom_density(color = "red", linewidth = 1) +
+  labs(title = "Histogram of Pvalues for dwarfism (HG) with Density Curve", 
+       x = "Pvalue", y = "Density") +
+  theme_minimal()+
+  theme(
+    panel.border = element_rect(color = "black", fill = NA, size = 1.2) # adds frame
+  )
+
+
+
+histo1 <- ggplot(Table.G, aes(x = Pr)) +
+  geom_histogram(
+    aes(y = after_stat(density)),
+    binwidth = 0.025,
+    fill = "skyblue",
+    color = "black"
+  ) +
+  geom_density(color = "red", linewidth = 1) +
+  labs(
+    title = "Histogram of Pvalues for dwarfism (HG) with Density Curve",
+    x = "Pvalue",
+    y = "Density"
+  ) +
+  theme_minimal() +
+  theme(panel.border = element_rect(color = "black", fill = NA, linewidth = 1.2))
+
+# Display the plot
+histo1
+
+
+
+# adjust Pvalues for multiple testing using FDR methods and turn pvalues into logp values
+Table.G<- Table.G%>%
+  mutate(adj.Pvalue = p.adjust(Pr, method = "fdr"))%>%
+  mutate(log10p_adj = -log10(adj.Pvalue))
+
+write.xlsx(Table.G, file = "./OUTPUT/allmaps_HG.xlsx")
+
+# making MANHATTAN plot
+# this plot displays the -log10 of the adjusted p-values for each marker across #the genome, with different colors for each chromosome. The dashed red line #indicates a significance threshold of 0.01.
+
+# the motivation of 0.01 is that we are testing 100 markers, so the Bonferroni #correction would be 0.05/100 = 0.0005, which is too stringent. Instead, we use a #less stringent threshold of 0.01 to identify potential associations between #markers and the trait of interest.
+
+    ggplot(Table.G, aes(x=Position, y=log10p_adj, color=Chromosome)) +
+      geom_point(size=0.6) +
+      geom_hline(yintercept = -log10(1e-2), color = "red", linetype = "dashed")+
+      facet_wrap(~Chromosome, scales="free_x", nrow=1) +
+      theme_bw() +
+      theme(legend.position="none") +
+      labs(title = str_c("MANHATTAN plot for C1&C2 dwarfism (height/girth"),
+           y = "-log10(p)", x = "BP position") 
+    
+   ggsave(filename = "./FIGURES/MANHATTAN PLOT C1&C2 dwarfism HG.png")
+    
+    
+   
+
+
+
+
+
+```
+
+
+
+# {-}
