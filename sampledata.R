@@ -1,0 +1,130 @@
+library(writexl)
+# Set a seed for reproducibility
+set.seed(42)
+
+# Parameters
+n_markers <- 1852
+n_chr <- 13
+
+# 1. Create marker names and assign them randomly across 13 chromosomes
+marker_names <- paste0("M_", sprintf("%04d", 1:n_markers))
+chromosomes <- sample(paste0("Chr_", 1:n_chr), n_markers, replace = TRUE)
+
+# 2. Combine into a initial data frame
+marker_data <- data.frame(
+  Marker = marker_names,
+  Chromosome = chromosomes,
+  Position = NA,
+  stringsAsFactors = FALSE
+)
+
+# 3. Generate realistic, sorted physical positions (in base pairs) for each chromosome
+for (i in 1:n_chr) {
+  chr_name <- paste0("Chr_", i)
+  idx <- which(marker_data$Chromosome == chr_name)
+  n_chr_markers <- length(idx)
+  
+  if (n_chr_markers > 0) {
+    # Assuming chromosome sizes up to ~150 Mb; sample unique positions and sort them
+    positions <- sort(sample(1:150000000, n_chr_markers))
+    marker_data$Position[idx] <- positions
+  }
+}
+
+# 4. Sort the dataframe cleanly by Chromosome and Position
+marker_data$Chr_Num <- as.numeric(gsub("Chr_", "", marker_data$Chromosome))
+marker_data <- marker_data[order(marker_data$Chr_Num, marker_data$Position), ]
+marker_data$Chr_Num <- NULL # Clean up temporary sorting column
+row.names(marker_data) <- NULL
+
+# Preview the first 10 rows of your dataset
+head(marker_data, 10)
+
+# Optional: Export to a CSV file
+write.csv(marker_data, "banana_markers_1852.csv", row.names = FALSE)
+
+# Set seed for reproducibility
+set.seed(123)
+
+# Parameters
+n_accessions <- 332
+n_markers <- 1852
+
+# 1. Create accession names for Column 1
+accessions <- paste0("Acc_", sprintf("%03d", 1:n_accessions))
+
+# 2. Create marker names (matching the 1852 markers)
+marker_names <- paste0("M_", sprintf("%04d", 1:n_markers))
+
+# 3. Generate genotype data matrix (R = Reference, A = Alternative, H = Heterozygous)
+# Using realistic probabilities (e.g., 40% R, 40% A, 20% H)
+genotype_matrix <- matrix(
+  sample(c("R", "A", "H"), n_accessions * n_markers, replace = TRUE, prob = c(0.4, 0.4, 0.2)),
+  nrow = n_accessions,
+  ncol = n_markers
+)
+
+# 4. Combine into the final data frame with Accession as Column 1
+offsprings_only <- data.frame(
+  Accession = accessions,
+  genotype_matrix,
+  stringsAsFactors = FALSE
+)
+
+# Assign correct column names
+colnames(offsprings_only) <- c("Accession", marker_names)
+
+# Verify dimensions (Should be 332 rows by 1853 columns: 1 accession col + 1852 marker cols)
+print(dim(offsprings_only))
+
+# Preview the first 5 rows and first 6 columns of the dataset
+head(offsprings_only[, 1:6])
+
+# Optional: Export to a CSV file
+write.csv(offsprings_only, "offsprings_only_genotypes.csv", row.names = FALSE)
+
+#pheno data
+# Set seed for reproducibility
+set.seed(456)
+
+# Parameters
+n_accessions <- 332
+accessions <- paste0("Acc_", sprintf("%03d", 1:n_accessions))
+
+# --- Sheet 1: Cycle 1 ---
+cycle1_girth <- round(runif(n_accessions, min = 45, max = 85), 1)   # Plant girth (cm)
+cycle1_height <- round(runif(n_accessions, min = 220, max = 380), 1) # Plant height (cm)
+
+pheno_cycle1 <- data.frame(
+  Cycle = "Cycle 1",
+  Accession = accessions,
+  `plant girth at 1m at flowering` = cycle1_girth,
+  `plant height` = cycle1_height,
+  check.names = FALSE,
+  stringsAsFactors = FALSE
+)
+
+# --- Sheet 2: Cycle 2 ---
+# Adding realistic physiological correlation/variation relative to Cycle 1
+cycle2_girth <- round(pmax(40, cycle1_girth + rnorm(n_accessions, mean = 2, sd = 4)), 1)
+cycle2_height <- round(pmax(200, cycle1_height + rnorm(n_accessions, mean = 5, sd = 10)), 1)
+
+pheno_cycle2 <- data.frame(
+  Cycle = "Cycle 2",
+  Accession = accessions,
+  `plant girth at 1m at flowering` = cycle2_girth,
+  `plant height` = cycle2_height,
+  check.names = FALSE,
+  stringsAsFactors = FALSE
+)
+
+# Preview first 5 rows of Cycle 1
+head(pheno_cycle1, 5)
+
+# Preview first 5 rows of Cycle 2
+
+head(pheno_cycle2, 5)
+
+# Optional: Export both cycles to Excel sheets or CSVs
+library(openxlsx)
+write.xlsx(list("Cycle 1" = pheno_cycle1, "Cycle 2" = pheno_cycle2), file = "phenotypic_data_cycles.xlsx")
