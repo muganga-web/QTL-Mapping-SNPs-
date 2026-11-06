@@ -29,57 +29,57 @@ pheno.C1 <- read.xlsx("./data/phenodata.xlsx", sheet = "Cycle 1")
 names(pheno.C1) 
 # turning phenotype columns into numeric variables
 pheno.C1<- pheno.C1%>%
-  mutate_at(vars(Pulp,Number.of.Leaves,Plant.height,Plant.Girth.at.1m.at.flowering), as.numeric)
+  mutate_at(vars(plant.height,plant.girth.at.1m.at.flowering), as.numeric)
 
-pheno.C2  <- read.xlsx("./DATA/PhenoData.xlsx",sheet = "Data_C2")
-#names(pheno.C2) 
+pheno.C2  <- read.xlsx("./data/phenodata.xlsx", sheet = "Cycle 2")
+names(pheno.C2) 
 # turning phenotype columns into numeric variables
 pheno.C2<- pheno.C2%>%
-  mutate_at(vars(Pulp,Number.of.Leaves,Plant.height,Plant.Girth.at.1m.at.flowering), as.numeric)
+  mutate_at(vars(plant.height,plant.girth.at.1m.at.flowering), as.numeric)
 
 # uploading genotype files
-geno <- read.xlsx("./DATA/GenoData_limited.xlsx", sheet = "offspring_only")
-SNP <- read.xlsx("./DATA/GenoData_limited.xlsx", sheet = "marker_data")
+geno <- read.xlsx("./data/genodata.xlsx", sheet = "offsprings_only")
+SNP <- read.xlsx("./data/genodata.xlsx", sheet = "marker_data")
 
 #merging pheno.C1 and pheno.C2 into a single phenotype file and turning Cycle into a factor
 pheno <- bind_rows(pheno.C1, pheno.C2)%>%
-  mutate_at(vars(Cycle),as.factor)
+  mutate_at(vars(cycle),as.factor)
 
-# renaming pheno$accesion_name and turning into factor
+#turning accession into factor
+
 pheno<-pheno%>%
-  rename(accession = accession_name)%>%
   mutate_at(vars(accession), as.factor)
   
 # turning phenotype columns into numeric variables
 #pheno<- pheno%>%
- # mutate_at(vars(Pulp,Number.of.Leaves,Plant.height.,Plant.Girth.at.1m.at# .flowering), as.numeric)
+ # mutate_at(vars(Number.of.Leaves,Plant.height.,Plant.Girth.at.1m.at# .flowering), as.numeric)
 
 # calculating ratio = # leaves/height of the plant; and plant height:girth ratio
 pheno <- pheno%>%
-  mutate(ratio_lh = Number.of.Leaves/Plant.height)%>%
-  mutate(ratio_hg = Plant.height/Plant.Girth.at.1m.at.flowering)
+  mutate(ratio_lh = number.of.leaves/plant.height)%>%
+  mutate(ratio_hg = plant.height/plant.girth.at.1m.at.flowering)
 
-# renaming GENOTYPE and turning into factor
+# turning name in GENO into factor
+str(geno)
 geno<-geno%>%
-  rename(accession = GENOTYPE)%>%
   mutate_at(vars(accession),as.factor)
-
-
 
 # combine pheno and geno into a single GENO file
 # Only what is common between pheno and geno will be kept in the GENO file
 GENO<-pheno%>%
   right_join(geno, by = "accession")
+GENO<-GENO%>%
+   mutate_at(vars(accession),as.factor)
 
-
+str(GENO$accession)
 # make long format of GENO
 
 cnames<-colnames(GENO)
 cnames
-
+dim(GENO)
 GENO.L <- GENO%>%
-  pivot_longer(cols = cnames[26:280], names_to = "MARKER",values_to = "genotype")%>%
-  mutate(MARKER = as.factor(MARKER))%>%
+  pivot_longer(cols = cnames[8:1859], names_to = "marker",values_to = "genotype")%>%
+  mutate(marker = as.factor(marker))%>%
   filter(genotype != "NA")
 
 ```
@@ -91,95 +91,141 @@ GENO.L <- GENO%>%
 ```{r mapping height/girth ratio }
 
 # generate index of markers to loop through
-index <- GENO.L%>%group_by(MARKER)%>%
+index <- GENO.L%>%group_by(marker)%>%
   summarise(count = n())%>%
-  pull(MARKER) %>%  
+  pull(marker) %>%  
   as.character()
 
 # fit LMM marker by marker by lapply function to allow parallelization and store the results in a list
 
-allmap <- lapply(seq_along(index), function(i) {
-  message("Test for marker.id: ", i)
+# -------------------------------------------------
+# Test only the first 20 markers first (recommended)
+# -------------------------------------------------
+index_test <- index[1:20]
 
-  # always define results as NULL (empty list) at the beginning of the loop
+allmap <- lapply(seq_along(index_test), function(i) {
+  
+  message("Test for marker.id: ", i, " → ", index_test[i])
+  
   results <- NULL
-
-  # subset data to a single MARKER
+  
+  # Subset data for the current marker
   dataS <- GENO.L %>%
-    filter(MARKER == index[i]) %>%   
-    mutate(genotype = as.factor(genotype))%>%
+    filter(marker == index_test[i]) %>%
+    mutate(genotype = droplevels(as.factor(genotype))) %>%
     drop_na(ratio_hg)
-#index[i] means that we are filtering the data for the specific marker at position i in the #index vector. This allows us to analyze each marker separately in the loop.
   
-  if (nlevels(droplevels(dataS$genotype)) >= 2) {
-# Above requires that there are at least 2 genotypes for the marker to perform the analysis. If #there is only one genotype, the model cannot be fitted, and the results will remain NULL.
-
-#segregating the data by Cycle and accession to account for the nested structure of the data    
-    # fit the model and store the results
-  mod <- lmer(ratio_hg ~ Cycle + genotype + #(1|Cycle:block_number)+
-              (1|Cycle:accession), data = dataS)
-  summary(mod)
-  res <- compute_redres(mod, type = "std_cond")
-  
-# compute the fitted values   
-  fit <- fitted(mod)
-  
-  # flag observations as outliers
-  dataS<- dataS%>% mutate(res, fit)
-  dataS <- dataS %>% mutate(flag = factor(ifelse(abs(res) > 3, "outlier", "ok")))
-  
-  # replace outliers with NA's
-  dataS<-dataS%>%
-    mutate(ratio_hg = ifelse(abs(res) > 3, NA, ratio_hg))
-  
-  # refit the model and store the results
-  mod <- lmer(ratio_hg ~ Cycle + genotype + #(1|Cycle:block_number)+
-                (1|Cycle:accession), data = dataS)
-  
-  # extract anova
-  anova <- as_tibble(anova(mod)) %>%
-    rename ("Pr" = "Pr(>F)")
-  
-  # add factor column
-  anova$factor <- c("Cycle","genotype")
-  
-  
-  # obtain predictions
-  pred <- emmeans(mod, specs = "genotype") %>% 
-    as_tibble() 
-  
-    results <- list(ANV = anova,
-                    MEANS = pred)
+  # Basic checks before fitting
+  if (nrow(dataS) < 20) {
+    message("  → Skipped: too few observations")
+    return(NULL)
   }
-
+  
+  if (nlevels(dataS$genotype) < 2) {
+    message("  → Skipped: fewer than 2 genotype classes")
+    return(NULL)
+  }
+  
+  # Optional but recommended: scale the response to help convergence
+  dataS <- dataS %>%
+    mutate(ratio_hg_scaled = as.numeric(scale(ratio_hg)))
+  
+  # Wrap the modelling in tryCatch so one failure does not stop the loop
+  tryCatch({
+    
+    # ---- First model ----
+    mod <- lmer(ratio_hg_scaled ~ cycle + genotype + (1|accession), 
+                data = dataS,
+                control = lmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 100000)))
+    
+    # Residuals and outlier detection
+    res <- compute_redres(mod, type = "std_cond")
+    
+    dataS <- dataS %>%
+      mutate(res = res) %>%
+      mutate(ratio_hg_scaled = ifelse(abs(res) > 3, NA, ratio_hg_scaled))
+    
+    # Check we still have enough data after outlier removal
+    dataS2 <- dataS %>% drop_na(ratio_hg_scaled)
+    
+    if (nrow(dataS2) < 20 || nlevels(droplevels(dataS2$genotype)) < 2) {
+      message("  → Skipped after outlier removal: insufficient data")
+      return(NULL)
+    }
+    
+    # ---- Refit after outlier removal ----
+    mod <- lmer(ratio_hg_scaled ~ cycle + genotype + (1|accession), 
+                data = dataS2,
+                control = lmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 100000)))
+    
+    # ANOVA table
+    anova_tab <- as_tibble(anova(mod)) %>%
+      rename(Pr = `Pr(>F)`)
+    anova_tab$factor <- c("cycle", "genotype")
+    
+    # Estimated marginal means
+    pred <- emmeans(mod, specs = "genotype") %>%
+      as_tibble()
+    
+    results <- list(ANV = anova_tab, MEANS = pred)
+    
+  }, error = function(e) {
+    message("  → Error for this marker: ", e$message)
+    return(NULL)
+  })
+  
   return(results)
 })
 
+# How many markers returned valid results?
+sum(!sapply(allmap, is.null))
+
+
 # get new_index of markers for which the mapping was performed, by filtering out the "NULL" outputs
 # this shows successful mapping for markers with at least 2 genotypes and no errors in the #model fitting
-valid <- sapply(allmap, function(x) !is.null(x))
-new_index <- index[valid]
+#valid <- sapply(allmap, function(x) !is.null(x))
+#new_index <- index[valid]
+
+# Keep only successful markers
+allmap_clean <- allmap[!sapply(allmap, is.null)]
+
+# Get the names of the successful markers
+successful_markers <- index_test[!sapply(allmap, is.null)]
+names(allmap_clean) <- successful_markers
 
 # filter allmap to keep only the valid outputs
-allmap <- allmap[sapply(allmap, is.list)]
+#allmap <- allmap[sapply(allmap, is.list)]
 
 # assign new_index as names of allmap
-names(allmap)<-new_index
+#names(allmap)<-new_index
 
 # extract AOV results
 #AOV results are extracted from the list of results for each marker and combined into a single #data frame. The bind_rows function is used to combine the individual data frames for each #marker, and the .id argument is used to create a new column called "MARKER" that contains the #names of the markers.
 
-allaov <- lapply(allmap, function(x) {
-  return(x$ANV)
-}) %>%  bind_rows(.id = "MARKER")
+
+# Extract ANOVA tables
+anova_list <- lapply(allmap_clean, function(x) x$ANV)
+
+
+allaov <- lapply(allmap_clean, function(x) x$ANV) %>%
+  bind_rows(.id = "marker")
+
+head(allaov$marker)
 
 # extract MEANS results
 # mean for a trait across different genotypes for each marker are extracted from the list of #results for each marker and combined into a single data frame. The bind_rows function is used #to combine the individual data frames for each marker, and the .id argument is used to create #a new column called "MARKER" that contains the names of the markers.
 # if means are significant, we get peaks for the trait across different genotypes for each #marker. This information can be used to identify markers that are associated with significant #differences in the trait of interest.
 
-allmeans <- lapply(allmap, function(x) {
-  return(x$MEANS)
-}) %>%  bind_rows(.id = "MARKER")
+# Extract means
+means_list <- lapply(allmap_clean, function(x) x$MEANS)
+
+
+#allmeans <- lapply(allmap_clean, function(x) {
+#  return(x$MEANS)
+#}) %>%  bind_rows(.id = "marker")
+
+allmeans <- lapply(allmap_clean, function(x) x$MEANS) %>%
+  bind_rows(.id = "marker")
 
 write.xlsx(allaov, "./OUTPUT/allaov dwarfism HG C1&C2.xlsx")
 write.xlsx(allmeans, "./OUTPUT/allmeans dwarfism HG C1&C2.xlsx")
@@ -192,12 +238,15 @@ write.xlsx(allmeans, "./OUTPUT/allmeans dwarfism HG C1&C2.xlsx")
 
 # right join with marker data to get the positions and save
 Table <- allaov%>%
-  right_join(SNP, by="MARKER")
+  right_join(SNP, by="marker")
 
 
 
 Table.G<-Table%>%
   filter(factor == "genotype")
+
+head(Table.G)
+dim(Table.G)
 
 # make histogram of pvalues
 histo1<-ggplot(Table.G, aes(x = Pr)) +
@@ -229,6 +278,21 @@ histo1 <- ggplot(Table.G, aes(x = Pr)) +
   theme_minimal() +
   theme(panel.border = element_rect(color = "black", fill = NA, linewidth = 1.2))
 
+hist_p <- ggplot(Table.G, aes(x = Pr)) +
+  geom_histogram(aes(y = after_stat(density)), bins = 30,
+                 fill = "#2b5c8f", color = "white", alpha = 0.8) +
+  geom_density(color = "#d95f02", linewidth = 1) +
+  labs(
+    title = "Histogram of P-values for Dwarfism (HG)",
+    x = "P-value",
+    y = "Density"
+  ) +
+  theme_bw(base_size = 13) +
+  theme(plot.title = element_text(face = "bold", hjust = 0.5))
+
+print(hist_p)
+ggsave("output/histogram_pvalues_HG.png", hist_p, width = 8, height = 5, dpi = 300)    
+
 # Display the plot
 histo1
 
@@ -246,10 +310,10 @@ write.xlsx(Table.G, file = "./OUTPUT/allmaps_HG.xlsx")
 
 # the motivation of 0.01 is that we are testing 100 markers, so the Bonferroni #correction would be 0.05/100 = 0.0005, which is too stringent. Instead, we use a #less stringent threshold of 0.01 to identify potential associations between #markers and the trait of interest.
 
-    ggplot(Table.G, aes(x=Position, y=log10p_adj, color=Chromosome)) +
+    ggplot(Table.G, aes(x=position, y=log10p_adj, color=chromosome)) +
       geom_point(size=0.6) +
       geom_hline(yintercept = -log10(1e-2), color = "red", linetype = "dashed")+
-      facet_wrap(~Chromosome, scales="free_x", nrow=1) +
+      facet_wrap(~chromosome, scales="free_x", nrow=1) +
       theme_bw() +
       theme(legend.position="none") +
       labs(title = str_c("MANHATTAN plot for C1&C2 dwarfism (height/girth"),
@@ -257,8 +321,35 @@ write.xlsx(Table.G, file = "./OUTPUT/allmaps_HG.xlsx")
     
    ggsave(filename = "./FIGURES/MANHATTAN PLOT C1&C2 dwarfism HG.png")
     
-    
-   
+
+  # Example assuming columns are called chr and pos
+manhattan_df <- Table.G %>%
+  filter(!is.na(chromosome), !is.na(position)) %>%          # change names if needed
+  arrange(chromosome, position) %>%
+  mutate(
+    chromosome = as.factor(chromosome),
+    logp = -log10(Pr)
+  )
+
+man_plot <- ggplot(manhattan_df, aes(x = position, y = logp, color = chromosome)) +
+  geom_point(alpha = 0.7, size = 1.5) +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "red") +
+  facet_wrap(~chromosome, scales = "free_x", nrow = 1) +
+  labs(
+    title = "Manhattan Plot – Dwarfism (Height:Girth ratio)",
+    x = "Position",
+    y = expression(-log[10](p))
+  ) +
+  theme_bw(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    legend.position = "none",
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank()
+  )
+
+print(man_plot)
+ggsave("output/manhattan_HG.png", man_plot, width = 12, height = 5, dpi = 300) 
 
 
 

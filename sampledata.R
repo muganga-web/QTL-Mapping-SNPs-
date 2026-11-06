@@ -92,14 +92,16 @@ n_accessions <- 332
 accessions <- paste0("Acc_", sprintf("%03d", 1:n_accessions))
 
 # --- Sheet 1: Cycle 1 ---
-cycle1_girth <- round(runif(n_accessions, min = 45, max = 85), 1)   # Plant girth (cm)
+cycle1_girth <- round(runif(n_accessions, min = 45, max = 85), 1)   # Plant girth at 1m at flowering (cm)
 cycle1_height <- round(runif(n_accessions, min = 220, max = 380), 1) # Plant height (cm)
+cycle1_leaves <- round(runif(n_accessions, min = 8, max = 16), 0)    # Number of leaves
 
 pheno_cycle1 <- data.frame(
   Cycle = "Cycle 1",
   Accession = accessions,
   `plant girth at 1m at flowering` = cycle1_girth,
   `plant height` = cycle1_height,
+  `number of leaves` = cycle1_leaves,
   check.names = FALSE,
   stringsAsFactors = FALSE
 )
@@ -108,12 +110,14 @@ pheno_cycle1 <- data.frame(
 # Adding realistic physiological correlation/variation relative to Cycle 1
 cycle2_girth <- round(pmax(40, cycle1_girth + rnorm(n_accessions, mean = 2, sd = 4)), 1)
 cycle2_height <- round(pmax(200, cycle1_height + rnorm(n_accessions, mean = 5, sd = 10)), 1)
+cycle2_leaves <- round(pmin(20, pmax(6, cycle1_leaves + rnorm(n_accessions, mean = 0, sd = 1.5))), 0)
 
 pheno_cycle2 <- data.frame(
   Cycle = "Cycle 2",
   Accession = accessions,
   `plant girth at 1m at flowering` = cycle2_girth,
   `plant height` = cycle2_height,
+  `number of leaves` = cycle2_leaves,
   check.names = FALSE,
   stringsAsFactors = FALSE
 )
@@ -122,9 +126,9 @@ pheno_cycle2 <- data.frame(
 head(pheno_cycle1, 5)
 
 # Preview first 5 rows of Cycle 2
-
 head(pheno_cycle2, 5)
 
 # Optional: Export both cycles to Excel sheets or CSVs
 library(openxlsx)
 write.xlsx(list("Cycle 1" = pheno_cycle1, "Cycle 2" = pheno_cycle2), file = "phenotypic_data_cycles.xlsx")
+getwd()  # Check the current working directory to locate the saved file
