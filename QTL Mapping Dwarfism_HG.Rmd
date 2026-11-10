@@ -26,13 +26,13 @@ library(redres)
 ```{r uploading data + data formatting}
 ### uploading phenotype files
 pheno.C1 <- read.xlsx("./data/phenodata.xlsx", sheet = "Cycle 1")
-names(pheno.C1) 
+#names(pheno.C1) 
 # turning phenotype columns into numeric variables
 pheno.C1<- pheno.C1%>%
   mutate_at(vars(plant.height,plant.girth.at.1m.at.flowering), as.numeric)
 
 pheno.C2  <- read.xlsx("./data/phenodata.xlsx", sheet = "Cycle 2")
-names(pheno.C2) 
+#names(pheno.C2) 
 # turning phenotype columns into numeric variables
 pheno.C2<- pheno.C2%>%
   mutate_at(vars(plant.height,plant.girth.at.1m.at.flowering), as.numeric)
@@ -60,7 +60,7 @@ pheno <- pheno%>%
   mutate(ratio_hg = plant.height/plant.girth.at.1m.at.flowering)
 
 # turning name in GENO into factor
-str(geno)
+#str(geno)
 geno<-geno%>%
   mutate_at(vars(accession),as.factor)
 
@@ -71,12 +71,12 @@ GENO<-pheno%>%
 GENO<-GENO%>%
    mutate_at(vars(accession),as.factor)
 
-str(GENO$accession)
+#str(GENO$accession)
 # make long format of GENO
 
 cnames<-colnames(GENO)
-cnames
-dim(GENO)
+#cnames
+#dim(GENO)
 GENO.L <- GENO%>%
   pivot_longer(cols = cnames[8:1859], names_to = "marker",values_to = "genotype")%>%
   mutate(marker = as.factor(marker))%>%
@@ -210,7 +210,7 @@ anova_list <- lapply(allmap_clean, function(x) x$ANV)
 allaov <- lapply(allmap_clean, function(x) x$ANV) %>%
   bind_rows(.id = "marker")
 
-head(allaov$marker)
+#head(allaov$marker)
 
 # extract MEANS results
 # mean for a trait across different genotypes for each marker are extracted from the list of #results for each marker and combined into a single data frame. The bind_rows function is used #to combine the individual data frames for each marker, and the .id argument is used to create #a new column called "MARKER" that contains the names of the markers.
@@ -245,39 +245,10 @@ Table <- allaov%>%
 Table.G<-Table%>%
   filter(factor == "genotype")
 
-head(Table.G)
-dim(Table.G)
+#head(Table.G)
+#dim(Table.G)
 
 # make histogram of pvalues
-histo1<-ggplot(Table.G, aes(x = Pr)) +
-  geom_histogram(aes(y = ..density..), binwidth = 0.025,
-                 fill = "skyblue", color = "black") +
-  geom_density(color = "red", linewidth = 1) +
-  labs(title = "Histogram of Pvalues for dwarfism (HG) with Density Curve", 
-       x = "Pvalue", y = "Density") +
-  theme_minimal()+
-  theme(
-    panel.border = element_rect(color = "black", fill = NA, size = 1.2) # adds frame
-  )
-
-
-
-histo1 <- ggplot(Table.G, aes(x = Pr)) +
-  geom_histogram(
-    aes(y = after_stat(density)),
-    binwidth = 0.025,
-    fill = "skyblue",
-    color = "black"
-  ) +
-  geom_density(color = "red", linewidth = 1) +
-  labs(
-    title = "Histogram of Pvalues for dwarfism (HG) with Density Curve",
-    x = "Pvalue",
-    y = "Density"
-  ) +
-  theme_minimal() +
-  theme(panel.border = element_rect(color = "black", fill = NA, linewidth = 1.2))
-
 hist_p <- ggplot(Table.G, aes(x = Pr)) +
   geom_histogram(aes(y = after_stat(density)), bins = 30,
                  fill = "#2b5c8f", color = "white", alpha = 0.8) +
@@ -291,11 +262,10 @@ hist_p <- ggplot(Table.G, aes(x = Pr)) +
   theme(plot.title = element_text(face = "bold", hjust = 0.5))
 
 print(hist_p)
-ggsave("output/histogram_pvalues_HG.png", hist_p, width = 8, height = 5, dpi = 300)    
+#ggsave("output/histogram_pvalues_HG.png", hist_p, width = 8, height = 5, dpi = 300)    
 
 # Display the plot
-histo1
-
+#hist_p
 
 
 # adjust Pvalues for multiple testing using FDR methods and turn pvalues into logp values
@@ -303,28 +273,17 @@ Table.G<- Table.G%>%
   mutate(adj.Pvalue = p.adjust(Pr, method = "fdr"))%>%
   mutate(log10p_adj = -log10(adj.Pvalue))
 
-write.xlsx(Table.G, file = "./OUTPUT/allmaps_HG.xlsx")
+#write.xlsx(Table.G, file = "./OUTPUT/allmaps_HG.xlsx")
 
 # making MANHATTAN plot
 # this plot displays the -log10 of the adjusted p-values for each marker across #the genome, with different colors for each chromosome. The dashed red line #indicates a significance threshold of 0.01.
 
 # the motivation of 0.01 is that we are testing 100 markers, so the Bonferroni #correction would be 0.05/100 = 0.0005, which is too stringent. Instead, we use a #less stringent threshold of 0.01 to identify potential associations between #markers and the trait of interest.
 
-    ggplot(Table.G, aes(x=position, y=log10p_adj, color=chromosome)) +
-      geom_point(size=0.6) +
-      geom_hline(yintercept = -log10(1e-2), color = "red", linetype = "dashed")+
-      facet_wrap(~chromosome, scales="free_x", nrow=1) +
-      theme_bw() +
-      theme(legend.position="none") +
-      labs(title = str_c("MANHATTAN plot for C1&C2 dwarfism (height/girth"),
-           y = "-log10(p)", x = "BP position") 
-    
-   ggsave(filename = "./FIGURES/MANHATTAN PLOT C1&C2 dwarfism HG.png")
-    
 
-  # Example assuming columns are called chr and pos
+  
 manhattan_df <- Table.G %>%
-  filter(!is.na(chromosome), !is.na(position)) %>%          # change names if needed
+  filter(!is.na(chromosome), !is.na(position)) %>%         
   arrange(chromosome, position) %>%
   mutate(
     chromosome = as.factor(chromosome),
@@ -349,7 +308,7 @@ man_plot <- ggplot(manhattan_df, aes(x = position, y = logp, color = chromosome)
   )
 
 print(man_plot)
-ggsave("output/manhattan_HG.png", man_plot, width = 12, height = 5, dpi = 300) 
+#ggsave("output/manhattan_HG.png", man_plot, width = 12, height = 5, dpi = 300) 
 
 
 
